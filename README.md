@@ -1,29 +1,31 @@
 # mxy-sandbox
 
-一个玩具级系统沙盒：**C++ 模拟虚拟系统，Python 渲染屏幕**。
+一个玩具级系统沙盒：**C++ 模拟虚拟系统，Python 提供 TTY 前端**。
 
-> 这不是真正的 Windows Sandbox，不提供安全隔离。
-> 它是一个可交互的**系统模拟器**：C++ 里跑一套虚拟 CPU / 内存 / 进程 / 文件系统，
-> Python 通过 socket 接收帧缓冲并显示，同时把键盘鼠标事件转发回去。
+> 不是真正的 Windows Sandbox，不提供安全隔离。
+> 它是一个可交互的系统模拟器：C++ 里跑一套虚拟 CPU / 内存 / 进程 / 文件系统，
+> Python 通过 TCP 连接，用纯终端界面操作这台"虚拟机"。
 
 ## 架构
 
 ```
 ┌──────────────────────┐         TCP          ┌──────────────────────┐
-│   Python 前端        │ <------------------> │   C++ 后端           │
+│   Python TTY 前端    │ <------------------> │   C++ 后端           │
 │                      │                      │                      │
-│  - pygame 显示帧     │   帧缓冲 (RGBA)      │  - 虚拟 CPU          │
-│  - 键盘/鼠标转发     │ -------------------> │  - 内存              │
-│  - HUD 覆盖层        │   输入事件 (JSON)    │  - 进程调度          │
-│                      │ <------------------  │  - 虚拟文件系统      │
-│                      │                      │  - 帧缓冲            │
+│  - 命令行交互        │   文本消息 (TXTL)    │  - 虚拟 CPU          │
+│  - 行编辑            │ <------------------  │  - 内存              │
+│  - 状态显示          │                      │  - 进程调度          │
+│                      │   命令 (JSON)        │  - 虚拟文件系统      │
+│                      │ -------------------> │  - 帧缓冲            │
+│                      │                      │                      │
+│                      │   帧缓冲 (FRM1)      │                      │
+│                      │ <------------------  │                      │
 └──────────────────────┘                      └──────────────────────┘
 ```
 
 - C++ 监听 `127.0.0.1:9000`
-- Python 启动后连接
-- C++ 每帧发送 `640x480x4` 字节的 RGBA
-- Python 发 JSON 行作为输入
+- TTY 前端在终端里跑，无需图形环境
+- 帧缓冲通道仍在，供未来的图形前端使用
 
 ## 目录结构
 
@@ -31,133 +33,200 @@
 mxy-sandbox/
 ├── core/
 │   ├── src/
-│   │   ├── main.cpp          入口 + 主循环
-│   │   ├── bridge.cpp/.h     TCP 服务器 + 协议解析
+│   │   ├── main.cpp           入口 + 主循环
+│   │   ├── bridge.cpp/.h      TCP 服务器 + 协议
 │   │   ├── framebuffer.cpp/.h 帧缓冲 + 8x8 位图字体
-│   │   ├── cpu.cpp/.h        虚拟 CPU
-│   │   ├── memory.h          内存（头文件内联）
-│   │   ├── machine.cpp/.h    进程表 / 调度器 / 系统调用
-│   │   ├── vfs.cpp/.h        虚拟文件系统
-│   │   ├── programs.cpp/.h   演示程序字节码 + 微型汇编器
-│   │   └── socket_util.h     跨平台 socket
+│   │   ├── cpu.cpp/.h         虚拟 CPU
+│   │   ├── memory.h           内存
+│   │   ├── machine.cpp/.h     进程表 / 调度 / 系统调用
+│   │   ├── vfs.cpp/.h         虚拟文件系统
+│   │   ├── programs.cpp/.h    演示程序字节码 + 微型汇编器
+│   │   └── socket_util.h      跨平台 socket
 │   └── CMakeLists.txt
 ├── shell/
-│   ├── main.py
-│   ├── client.py
-│   ├── display.py
-│   ├── input.py
+│   ├── tty_main.py            终端前端（推荐）
 │   └── requirements.txt
 ├── docs/
-│   ├── protocol.md
-│   └── isa.md
+│   ├── protocol.md            IPC 协议
+│   └── isa.md                 指令集
+├── Makefile
 ├── README.md
 └── LICENSE
 ```
 
 ## 构建
 
-### C++ 后端
+### Windows (MinGW)
 
 ```bash
 cd core
-mkdir -p build && cd build
-cmake ..
-cmake --build . --config Release
+g++ -std=c++17 -O2 -o sandbox-core.exe src\framebuffer.cpp src\vfs.cpp src\cpu.cpp src\machine.cpp src\programs.cpp src\bridge.cpp src\main.cpp -lws2_32
 ```
 
-Windows MinGW 单命令：
+### Linux / macOS
 
 ```bash
 cd core
-g++ -std=c++17 -O2 -o sandbox-core.exe src/*.cpp -lws2_32
+g++ -std=c++17 -O2 -o sandbox-core src/framebuffer.cpp src/vfs.cpp src/cpu.cpp src/machine.cpp src/programs.cpp src/bridge.cpp src/main.cpp -pthread
 ```
 
-Linux：
+### 用 Makefile
 
 ```bash
-cd core
-g++ -std=c++17 -O2 -o sandbox-core src/*.cpp -pthread
-```
-
-### Python 前端
-
-```bash
-cd shell
-pip install -r requirements.txt
+make            # 编译 core
+make clean      # 清理
 ```
 
 ## 运行
 
-终端 1：
+**终端 1** — 启动 core：
 
 ```bash
-./core/build/sandbox-core
-# 或 ./core/sandbox-core
+cd core
+./sandbox-core
 ```
 
-终端 2：
+输出：
+
+```
+[core] mxy-sandbox core listening on 127.0.0.1:9000
+[core] press Ctrl+C to quit
+[core] waiting for shell...
+```
+
+**终端 2** — 连接 TTY：
 
 ```bash
 cd shell
-python main.py
+python tty_main.py
 ```
 
-可选参数：`python main.py <host> <port>`。
+Windows 上直接双击 `run-tty.bat`，会自动开两个窗口。
 
-## 操作
+连接成功后你会看到：
 
-| 按键 | 作用 |
+```
+[tty] connected to 127.0.0.1:9000
+[tty] type 'help' for commands, 'quit' to exit
+
+mxy-sandbox TTY
+type 'help' for commands
+
+> 
+```
+
+## TTY 命令
+
+| 命令 | 说明 |
 |------|------|
-| F1   | 切换 HUD 覆盖层 |
-| R    | 重置并重新生成演示进程 |
-| Space| 清空帧缓冲 |
-| L    | 列出虚拟文件系统根目录 |
-| P    | 列出进程 |
+| `help` | 显示帮助 |
+| `ls [path]` | 列出虚拟文件 |
+| `cat <path>` | 打印文件内容 |
+| `ps` | 列出进程（pid / 名称 / 状态 / pc / 周期） |
+| `spawn <name>` | 启动程序：`rect-a` / `rect-b` / `line` / `file` |
+| `kill <pid>` | 结束进程 |
+| `clear` | 清空帧缓冲 |
+| `restart` | 重置机器，重新 spawn 演示进程 |
+| `quit` | 断开连接 |
+
+## 快速体验
+
+启动后依次输入：
+
+```
+> ps
+> ls /
+> cat /etc/motd
+> spawn line
+> ps
+> kill 3
+> restart
+> quit
+```
+
+## 指令集
+
+32 个 32 位通用寄存器，8 字节定长指令。
+
+每条指令编码：
+
+```
+偏移  长度  含义
+0     1     opcode
+1     1     rd
+2     1     rs1
+3     1     保留
+4     4     imm32（小端）
+```
+
+| Opcode | 助记符 | 语义 |
+|--------|--------|------|
+| 0x01 | MOV  rd, imm   | rd = imm |
+| 0x02 | MOVR rd, rs1   | rd = rs1 |
+| 0x03 | ADD  rd, rs1   | rd += rs1 |
+| 0x04 | SUB  rd, rs1   | rd -= rs1 |
+| 0x05 | ADDI rd, imm   | rd += imm |
+| 0x06 | MUL  rd, rs1   | rd *= rs1 |
+| 0x07 | SHL  rd, imm   | rd <<= imm |
+| 0x08 | JMP  imm       | pc = imm |
+| 0x09 | JZ   rd, imm   | if rd == 0: pc = imm |
+| 0x0A | JNZ  rd, imm   | if rd != 0: pc = imm |
+| 0x0B | LD   rd, [rs1] | rd = mem32[rs1] |
+| 0x0C | ST   [rd],rs1  | mem32[rd] = rs1 |
+| 0x0D | STB  [rd],rs1  | mem8[rd] = rs1 |
+| 0x0E | LDB  rd, [rs1] | rd = mem8[rs1] |
+| 0x0F | DRAW rd, rs1   | fb[rd] = rs1 |
+| 0x10 | SYS  imm       | 系统调用 |
+| 0xFF | HALT           | 停机 |
+
+## 系统调用
+
+| 编号 | 名称  | 参数 | 返回 |
+|------|-------|------|------|
+| 1 | exit  | r1 = code | - |
+| 2 | sleep | r1 = ticks | - |
+| 3 | draw  | r1 = x, r2 = y, r3 = color | - |
+| 4 | open  | r1 = path, r2 = mode | r0 = fd |
+| 5 | read  | r1 = fd, r2 = buf, r3 = len | r0 = n |
+| 6 | write | r1 = fd, r2 = buf, r3 = len | r0 = n |
+| 7 | close | r1 = fd | r0 = 0 |
+| 8 | print | r1 = str | - |
 
 ## 已实现
 
-- **阶段 1**：TCP 通信打通，Python 显示 C++ 帧
-- **阶段 2**：帧缓冲绘制（矩形、直线、8x8 位图文字），键盘鼠标事件转发
-- **阶段 3**：虚拟 CPU（32 寄存器、8 字节定长指令），每进程 1 MB 内存
-- **阶段 4**：轮转调度（默认 10000 周期一片）、虚拟文件系统、8 个系统调用
-- **阶段 5**：通过 `cmd` 消息实现的简易 shell（`spawn` / `kill` / `ls` / `cat` / `ps` / `clear` / `restart`）
+- **虚拟 CPU**：32 个 32 位寄存器，8 字节定长指令，每条带周期计数
+- **内存**：每进程独立 1 MB
+- **进程调度**：轮转，默认每 10000 周期切换
+- **虚拟文件系统**：`/etc`、`/home`、`/tmp`，预置 `/etc/motd`
+- **系统调用**：8 个
+- **帧缓冲**：640×480 RGBA，支持矩形、直线、8×8 位图文字
+- **TTY 前端**：行编辑，外部输出不打断输入
+- **TCP 协议**：文本通道 + 帧缓冲通道双路复用
 
-## 与原始设计文档的差异
+## 工作原理
 
-1. **指令编码改为 8 字节定长**。原文档的 4 字节编码只有 8 位立即数，
-   无法表示像素索引（最大 307199）或跳转地址。8 字节编码把 `imm` 扩到 32 位，
-   代价是代码体积翻倍——对玩具项目完全可接受。
-2. **每个进程独立 1 MB 内存**，而不是全局共享。这样两个进程互不干扰，
-   更贴近"多进程"的语义。
-3. **JSON 解析是扁平的**。控制命令改成扁平结构
-   （`{"type":"cmd","name":"spawn","arg":"rect-a"}`），
-   避免引入完整 JSON 库。需要嵌套时替换 `bridge.cpp` 里的 `FlatJson` 即可。
-4. **状态面板用 pygame HUD 覆盖层**，而不是 tkinter。
-   避免两个 GUI 事件循环打架。
-
-## 性能
-
-- 640×480×4 = 1.2 MB/帧，30 fps 约 36 MB/s
-- 本地 loopback 完全够用
-- 每帧模拟预算 200,000 个周期
-- 如需更高分辨率，优先考虑脏矩形而不是全帧发送
+1. C++ 启动，监听 `127.0.0.1:9000`
+2. Python 连接，C++ 主循环进入运行状态
+3. 每帧：
+   - 处理收到的输入事件（键盘、命令）
+   - 执行 200,000 个 CPU 周期
+   - 把日志推给 TTY
+   - 发送 640×480×4 字节的帧缓冲
+4. 调度器在两个演示进程之间轮转，你会在帧缓冲上看到两个矩形交替生长
 
 ## 可选升级
 
-1. 接 RISC-V：用 GCC 编译真程序进沙盒
-2. 图形 API：`draw_line`、`draw_circle`、blit sprite（系统调用形式暴露）
-3. 音频：Python 侧收 PCM 数据播放
-4. 网络模拟：两个 sandbox 实例通过虚拟网卡通信
-5. 调试器：Python 侧暂停、单步、查看寄存器
-6. 磁盘镜像：虚拟 FS 持久化到本地文件
+1. **图形 API**：`draw_line`、`draw_circle`、blit sprite 作为系统调用暴露
+2. **调试器**：`pause` / `step` / `regs`，单步执行、查看寄存器
+3. **RISC-V**：替换自定义指令集为 RV32I，用 GCC 编译真程序进沙盒
+4. **持久化 FS**：把 VFS 存成 `.img` 文件，重启不丢
+5. **多语言客户端**：用 Java / Rust 写另一份前端，展示协议通用性
 
 ## 参考
 
 - [Writing a Simple Operating System from Scratch](https://www.cs.bham.ac.uk/~exr/lectures/opsys/10_11/lectures/os-dev.pdf)
 - [Nand2Tetris](https://www.nand2tetris.org/)
 - [RISC-V Spec](https://riscv.org/technical/specifications/)
-- [QEMU](https://www.qemu.org/)
-- [pygame docs](https://www.pygame.org/docs/)
 
 ## License
 
