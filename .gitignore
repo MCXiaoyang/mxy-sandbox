@@ -1,0 +1,25 @@
+# build
+core/sandbox-core
+core/sandbox-core.exe
+core/build/
+*.o
+*.obj
+*.exe
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.user
+
+# OS
+.DS_Store
+Thumbs.db
+
+# misc
+release/
