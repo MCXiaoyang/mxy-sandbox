@@ -1,0 +1,59 @@
+name: build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux
+            bin: sandbox-core
+            flags: -pthread
+          - os: windows-latest
+            name: windows
+            bin: sandbox-core.exe
+            flags: -lws2_32
+          - os: macos-latest
+            name: macos
+            bin: sandbox-core
+            flags: -pthread
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        shell: bash
+        run: |
+          cd core
+          g++ -std=c++17 -O2 -Wall -Wextra \
+            -o ${{ matrix.bin }} \
+            src/framebuffer.cpp \
+            src/vfs.cpp \
+            src/cpu.cpp \
+            src/machine.cpp \
+            src/programs.cpp \
+            src/bridge.cpp \
+            src/main.cpp \
+            ${{ matrix.flags }}
+
+      - name: Verify binary
+        shell: bash
+        run: |
+          ls -lh core/${{ matrix.bin }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sandbox-core-${{ matrix.name }}
+          path: core/${{ matrix.bin }}
+          if-no-files-found: error
