@@ -204,8 +204,8 @@ bool Bridge::start(uint16_t port) {
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = ::htonl(INADDR_LOOPBACK);
-    addr.sin_port = ::htons(port);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = htons(port);
 
     if (::bind(listenSock_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
         net::closeSocket(listenSock_);

@@ -136,7 +136,7 @@ void handleEvent(Machine& m, Bridge& bridge, const InputEvent& ev) {
 } // namespace
 
 int main(int argc, char** argv) {
-    net::WinsockInit wsa;
+    [[maybe_unused]] net::WinsockInit wsa;
 
     uint16_t port = 9000;
     if (argc > 1) port = static_cast<uint16_t>(std::atoi(argv[1]));
